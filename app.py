@@ -2,7 +2,8 @@ import streamlit as st
 import plotly.graph_objects as go
 import pandas as pd
 
-from eia_data import fetch_series, fetch_padd_stocks, SERIES, PADD_AREAS
+from eia_data import SERIES, PADD_AREAS
+from data_cache import get_series_cached, get_padd_cached
 from chart_data import (
     build_seasonality_data,
     build_5yr_avg,
@@ -31,12 +32,12 @@ PALETTE = [
 
 @st.cache_data(ttl=3600)
 def get_series(series_key: str, api_key: str) -> pd.DataFrame:
-    return fetch_series(series_key, api_key)
+    return get_series_cached(series_key, api_key)
 
 
 @st.cache_data(ttl=3600)
 def get_padd_stocks(api_key: str) -> pd.DataFrame:
-    return fetch_padd_stocks(api_key)
+    return get_padd_cached(api_key)
 
 # ---------------------------------------------------------------------------
 # Layout helpers

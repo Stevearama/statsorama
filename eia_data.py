@@ -54,12 +54,20 @@ PADD_AREAS = {
 }
 
 
-def fetch_series(series_key: str, api_key: str) -> pd.DataFrame:
-    """Fetch a named weekly series from the EIA v1 API.
+def _parse_v1_response(payload: dict, scale) -> pd.DataFrame:
+    if "series" not in payload or not payload["series"]:
+        return pd.DataFrame(columns=["date", "value"])
+    raw = payload["series"][0]["data"]
+    df = pd.DataFrame(raw, columns=["date", "value"])
+    df["date"] = pd.to_datetime(df["date"])
+    df["value"] = pd.to_numeric(df["value"], errors="coerce")
+    if scale:
+        df["value"] = df["value"] / scale
+    return df.dropna(subset=["value"]).sort_values("date").reset_index(drop=True)
 
-    Returns a DataFrame with 'date' (datetime) and 'value' (float) columns,
-    sorted oldest-first. Values are scaled to display units as defined in SERIES.
-    """
+
+def fetch_series(series_key: str, api_key: str) -> pd.DataFrame:
+    """Fetch full history for a named weekly series from the EIA v1 API."""
     meta = SERIES[series_key]
     resp = requests.get(
         _V1_URL,
@@ -67,45 +75,36 @@ def fetch_series(series_key: str, api_key: str) -> pd.DataFrame:
         timeout=30,
     )
     resp.raise_for_status()
-    payload = resp.json()
-    if "series" not in payload or not payload["series"]:
-        raise ValueError(f"No data returned for series {meta['id']}")
-    raw = payload["series"][0]["data"]
-    df = pd.DataFrame(raw, columns=["date", "value"])
-    df["date"] = pd.to_datetime(df["date"])
-    df["value"] = pd.to_numeric(df["value"], errors="coerce")
-    if meta["scale"]:
-        df["value"] = df["value"] / meta["scale"]
-    return df.dropna(subset=["value"]).sort_values("date").reset_index(drop=True)
+    return _parse_v1_response(resp.json(), meta["scale"])
 
 
-def fetch_padd_stocks(api_key: str) -> pd.DataFrame:
-    """Fetch weekly crude oil stocks for all five PADDs from the EIA v2 API.
+def fetch_series_since(series_key: str, api_key: str, since: pd.Timestamp) -> pd.DataFrame:
+    """Fetch only weeks after `since` — used for incremental cache updates."""
+    meta = SERIES[series_key]
+    resp = requests.get(
+        _V1_URL,
+        params={
+            "api_key":   api_key,
+            "series_id": meta["id"],
+            "start":     since.strftime("%Y%m%d"),
+            "out":       "json",
+        },
+        timeout=30,
+    )
+    resp.raise_for_status()
+    return _parse_v1_response(resp.json(), meta["scale"])
 
-    Returns a DataFrame with 'date', 'area' (PADD name), and 'value' (MMbbl) columns.
-    """
-    params = [
-        ("api_key",               api_key),
-        ("frequency",             "weekly"),
-        ("data[0]",               "value"),
-        ("facets[product][]",     "EPC0"),
-        ("sort[0][column]",       "period"),
-        ("sort[0][direction]",    "asc"),
-        ("length",                "5000"),
-    ]
-    for code in PADD_AREAS.values():
-        params.append(("facets[duoarea][]", code))
 
+def _fetch_padd(params: list) -> pd.DataFrame:
     resp = requests.get(_V2_STOCKS_URL, params=params, timeout=30)
     resp.raise_for_status()
     records = resp.json().get("response", {}).get("data", [])
     if not records:
-        raise ValueError("No PADD stock data returned from EIA v2 API")
-
+        return pd.DataFrame(columns=["date", "area", "value"])
     df = pd.DataFrame(records)
     df = df.rename(columns={"period": "date"})
     df["date"] = pd.to_datetime(df["date"])
-    df["value"] = pd.to_numeric(df["value"], errors="coerce") / 1_000   # Mbbl → MMbbl
+    df["value"] = pd.to_numeric(df["value"], errors="coerce") / 1_000
     area_names = {v: k for k, v in PADD_AREAS.items()}
     df["area"] = df["duoarea"].map(area_names)
     return (
@@ -114,3 +113,36 @@ def fetch_padd_stocks(api_key: str) -> pd.DataFrame:
         .sort_values(["area", "date"])
         .reset_index(drop=True)
     )
+
+
+def fetch_padd_stocks(api_key: str) -> pd.DataFrame:
+    """Fetch full weekly crude stocks history for all five PADDs."""
+    params = [
+        ("api_key",            api_key),
+        ("frequency",          "weekly"),
+        ("data[0]",            "value"),
+        ("facets[product][]",  "EPC0"),
+        ("sort[0][column]",    "period"),
+        ("sort[0][direction]", "asc"),
+        ("length",             "5000"),
+    ]
+    for code in PADD_AREAS.values():
+        params.append(("facets[duoarea][]", code))
+    return _fetch_padd(params)
+
+
+def fetch_padd_stocks_since(api_key: str, since: pd.Timestamp) -> pd.DataFrame:
+    """Fetch only PADD stock weeks after `since` — used for incremental cache updates."""
+    params = [
+        ("api_key",            api_key),
+        ("frequency",          "weekly"),
+        ("data[0]",            "value"),
+        ("facets[product][]",  "EPC0"),
+        ("sort[0][column]",    "period"),
+        ("sort[0][direction]", "asc"),
+        ("length",             "500"),
+        ("start",              since.strftime("%Y-%m-%d")),
+    ]
+    for code in PADD_AREAS.values():
+        params.append(("facets[duoarea][]", code))
+    return _fetch_padd(params)
