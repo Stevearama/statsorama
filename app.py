@@ -51,7 +51,8 @@ def render_header(title: str, subtitle: str) -> None:
         .block-container {{padding-top: 1.5rem;}}
         </style>
         <h1 style='font-family:"Arial Black",Arial,sans-serif;
-                   color:#000000; margin-bottom:2px; font-size:2rem;'>
+                   color:#000000; margin-bottom:2px; font-size:2rem;
+                   padding-top:0.4rem;'>
             {title}
         </h1>
         <p style='color:#555555; font-size:15px; margin-top:0; margin-bottom:10px;'>
@@ -358,7 +359,7 @@ def render_series_section(
 
 def main() -> None:
     st.set_page_config(page_title="Statsorama — EIA Petroleum", layout="wide")
-    render_header("Statsorama", "U.S. Weekly Petroleum Status  ·  EIA data")
+    render_header("Stats-O-Rama", "U.S. Weekly Petroleum Status  ·  EIA data")
 
     try:
         api_key = st.secrets["eia_api_key"]
