@@ -328,7 +328,11 @@ def render_series_section(
 ) -> None:
     meta = SERIES[series_key]
     with st.spinner("Loading data…"):
-        df = get_series(series_key, api_key)
+        try:
+            df = get_series(series_key, api_key)
+        except Exception as e:
+            st.error(f"EIA API error: {e}")
+            st.stop()
 
     render_chart_title(meta["label"])
     render_metrics(df, meta["display_units"])
@@ -414,7 +418,11 @@ def main() -> None:
     if section == "Crude Stocks":
         if geo == "PADD Breakdown":
             with st.spinner("Loading PADD data…"):
-                padd_df = get_padd_stocks(api_key)
+                try:
+                    padd_df = get_padd_stocks(api_key)
+                except Exception as e:
+                    st.error(f"EIA API error: {e}")
+                    st.stop()
             padd_filtered = build_padd_timeline(padd_df, years=years or None)
             render_chart_title("Crude Oil Stocks — PADD Breakdown")
             fig = build_padd_chart(padd_filtered, chart_type)

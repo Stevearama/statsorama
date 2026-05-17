@@ -1,8 +1,8 @@
 import requests
 import pandas as pd
 
-_V1_URL = "https://api.eia.gov/series/"
-_V2_STOCKS_URL = "https://api.eia.gov/v2/petroleum/stoc/wstk/data/"
+_V2_SERIESID_URL = "https://api.eia.gov/v2/seriesid/"   # backward-compat for legacy series IDs
+_V2_STOCKS_URL   = "https://api.eia.gov/v2/petroleum/stoc/wstk/data/"
 
 # All weekly crude series available via the v1 series API
 SERIES = {
@@ -79,11 +79,11 @@ def _raise_with_detail(resp: requests.Response) -> None:
 
 
 def fetch_series(series_key: str, api_key: str) -> pd.DataFrame:
-    """Fetch full history for a named weekly series from the EIA v1 API."""
+    """Fetch full history for a named weekly series via the EIA v2 seriesid endpoint."""
     meta = SERIES[series_key]
     resp = requests.get(
-        _V1_URL,
-        params={"api_key": api_key, "series_id": meta["id"], "out": "json"},
+        f"{_V2_SERIESID_URL}{meta['id']}",
+        params={"api_key": api_key},
         timeout=30,
     )
     if not resp.ok:
@@ -95,13 +95,8 @@ def fetch_series_since(series_key: str, api_key: str, since: pd.Timestamp) -> pd
     """Fetch only weeks after `since` — used for incremental cache updates."""
     meta = SERIES[series_key]
     resp = requests.get(
-        _V1_URL,
-        params={
-            "api_key":   api_key,
-            "series_id": meta["id"],
-            "start":     since.strftime("%Y%m%d"),
-            "out":       "json",
-        },
+        f"{_V2_SERIESID_URL}{meta['id']}",
+        params={"api_key": api_key, "start": since.strftime("%Y%m%d")},
         timeout=30,
     )
     if not resp.ok:
