@@ -358,7 +358,7 @@ def render_series_section(
 # ---------------------------------------------------------------------------
 
 def main() -> None:
-    st.set_page_config(page_title="Statsorama — EIA Petroleum", layout="wide")
+    st.set_page_config(page_title="Stats-O-Rama — EIA Petroleum", layout="wide")
     render_header("Stats-O-Rama", "U.S. Weekly Petroleum Status  ·  EIA data")
 
     try:
