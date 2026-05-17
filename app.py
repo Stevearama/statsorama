@@ -418,6 +418,17 @@ def main() -> None:
 
     # ---- Main area --------------------------------------------------------------
 
+    # DEBUG — remove once response format is confirmed
+    import requests as _req
+    with st.expander("DEBUG: raw EIA API response (first 3 rows)", expanded=True):
+        _r = _req.get(
+            "https://api.eia.gov/v2/seriesid/PET.WCRSTUS1.W",
+            params={"api_key": api_key, "data[0]": "value", "length": "3"},
+            timeout=30,
+        )
+        st.write(f"HTTP {_r.status_code}")
+        st.json(_r.json())
+
     if section == "Crude Stocks":
         if geo == "PADD Breakdown":
             with st.spinner("Loading PADD data…"):
