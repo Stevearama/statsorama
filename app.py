@@ -26,6 +26,19 @@ PALETTE = [
     "#1A237E",  # navy
 ]
 
+# Ordered list of selectable series for the sidebar
+SERIES_OPTIONS = [
+    ("U.S. Crude Stocks",     "stocks_us"),
+    ("Cushing, OK Stocks",    "stocks_cushing"),
+    ("PADD Breakdown",        "padd"),
+    ("Crude Production",      "production"),
+    ("Crude Imports",         "imports"),
+    ("Refinery Crude Inputs", "refinery_inputs"),
+    ("Refinery Utilization",  "refinery_util"),
+]
+LABEL_TO_KEY = {label: key for label, key in SERIES_OPTIONS}
+KEY_TO_LABEL = {key: label for label, key in SERIES_OPTIONS}
+
 # ---------------------------------------------------------------------------
 # Data loading (cached)
 # ---------------------------------------------------------------------------
@@ -72,54 +85,6 @@ def render_chart_title(text: str) -> None:
     )
 
 # ---------------------------------------------------------------------------
-# Metrics row
-# ---------------------------------------------------------------------------
-
-def render_metrics(df: pd.DataFrame, display_units: str) -> None:
-    """Four headline metrics: latest, year-ago delta, 4-week avg, 5-year avg."""
-    if df.empty:
-        st.warning("No data returned from EIA API.")
-        return
-    latest = df.iloc[-1]
-    latest_val = float(latest["value"])
-    latest_date = pd.Timestamp(latest["date"])
-
-    # Year-ago: nearest data point at or before (today - 1 year)
-    year_ago_cutoff = latest_date - pd.DateOffset(years=1)
-    past = df[df["date"] <= year_ago_cutoff]
-    year_ago_val = float(past.iloc[-1]["value"]) if not past.empty else None
-
-    four_week_avg = float(df.tail(4)["value"].mean())
-
-    # 5-year same-week average
-    this_iso_week = latest_date.isocalendar().week
-    five_yr_rows = df[
-        (df["date"].dt.isocalendar().week == this_iso_week) &
-        (df["date"].dt.year >= latest_date.year - 5) &
-        (df["date"].dt.year < latest_date.year)
-    ]
-    five_yr_avg = float(five_yr_rows["value"].mean()) if not five_yr_rows.empty else None
-
-    fmt = lambda v: f"{v:,.1f} {display_units}"
-
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric(f"Latest  ({latest_date.strftime('%b %d, %Y')})", fmt(latest_val))
-
-    if year_ago_val is not None:
-        delta = latest_val - year_ago_val
-        c2.metric("Year Ago", fmt(year_ago_val), delta=f"{delta:+,.1f}")
-    else:
-        c2.metric("Year Ago", "N/A")
-
-    c3.metric("4-Week Average", fmt(four_week_avg))
-
-    if five_yr_avg is not None:
-        delta5 = latest_val - five_yr_avg
-        c4.metric("5-Year Avg (this week)", fmt(five_yr_avg), delta=f"{delta5:+,.1f}")
-    else:
-        c4.metric("5-Year Average", "N/A")
-
-# ---------------------------------------------------------------------------
 # Shared chart layout
 # ---------------------------------------------------------------------------
 
@@ -129,6 +94,7 @@ def _apply_base_layout(
     hovermode: str = "x",
     x_tickformat: str = None,
     x_dtick: str = None,
+    height: int = 360,
 ) -> None:
     xaxis = dict(
         showgrid=False,
@@ -137,7 +103,7 @@ def _apply_base_layout(
         linewidth=1.5,
         ticks="outside",
         ticklen=5,
-        tickfont=dict(color="#000000", size=12),
+        tickfont=dict(color="#000000", size=11),
     )
     if x_tickformat:
         xaxis["tickformat"] = x_tickformat
@@ -145,13 +111,14 @@ def _apply_base_layout(
         xaxis["dtick"] = x_dtick
 
     fig.update_layout(
+        height=height,
         plot_bgcolor="white",
         paper_bgcolor="white",
-        font=dict(family="Arial", size=12, color="#000000"),
+        font=dict(family="Arial", size=11, color="#000000"),
         xaxis=xaxis,
         yaxis=dict(
-            title=dict(text=y_title, font=dict(color="#000000")),
-            tickfont=dict(color="#000000"),
+            title=dict(text=y_title, font=dict(color="#000000", size=11)),
+            tickfont=dict(color="#000000", size=11),
             showgrid=True,
             gridcolor="#E8E8E8",
             gridwidth=1,
@@ -161,12 +128,12 @@ def _apply_base_layout(
         ),
         legend=dict(
             orientation="h",
-            y=-0.15,
+            y=-0.18,
             x=0,
             title_text="",
-            font=dict(size=11, color="#000000"),
+            font=dict(size=10, color="#000000"),
         ),
-        margin=dict(l=70, r=20, t=40, b=90),
+        margin=dict(l=60, r=10, t=30, b=80),
         hovermode=hovermode,
     )
 
@@ -176,7 +143,7 @@ def _add_today_vline(fig: go.Figure, x_val: str, label: bool = True) -> None:
     if label:
         fig.add_annotation(
             x=x_val, y=1.05, yref="paper", text="Today",
-            showarrow=False, font=dict(size=11, color="#555555"), xanchor="center",
+            showarrow=False, font=dict(size=10, color="#555555"), xanchor="center",
         )
 
 # ---------------------------------------------------------------------------
@@ -189,7 +156,6 @@ def build_seasonality_chart(
     show_5yr: bool,
     all_df: pd.DataFrame,
 ) -> go.Figure:
-    """Year-over-year seasonality chart — one line per year on a Jan-Dec x-axis."""
     fig = go.Figure()
     current_year = pd.Timestamp.today().year
     years = sorted(data["year"].unique())
@@ -215,7 +181,7 @@ def build_seasonality_chart(
             name=str(year),
             line=dict(
                 color=PALETTE[i % len(PALETTE)],
-                width=2.5 if year == current_year else 2,
+                width=2.5 if year == current_year else 1.5,
             ),
             hovertemplate="%{x|%d %b} · %{y:,.1f} " + display_units + "<extra>" + str(year) + "</extra>",
         ))
@@ -227,7 +193,6 @@ def build_seasonality_chart(
 
 
 def build_timeline_chart(data: pd.DataFrame, display_units: str) -> go.Figure:
-    """Single continuous line chart over actual dates."""
     fig = go.Figure()
     fig.add_trace(go.Scatter(
         x=data["date"],
@@ -254,7 +219,6 @@ def _hex_to_rgba(hex_color: str, alpha: float) -> str:
 
 
 def build_padd_chart(padd_df: pd.DataFrame, chart_type: str) -> go.Figure:
-    """Multi-line or stacked area chart of crude stocks across the five PADDs."""
     fig = go.Figure()
     areas = sorted(padd_df["area"].unique())
     display_units = "Million Barrels"
@@ -296,50 +260,56 @@ def build_padd_chart(padd_df: pd.DataFrame, chart_type: str) -> go.Figure:
 # ---------------------------------------------------------------------------
 
 def render_data_table(df: pd.DataFrame, display_units: str) -> None:
-    """Show the most recent 52 weeks with year-ago comparison."""
+    """Show the most recent 52 weeks with week-over-week comparison."""
     recent = df.tail(52).copy().sort_values("date", ascending=False)
 
-    def _year_ago(row_date):
-        cutoff = row_date - pd.DateOffset(years=1)
-        past = df[df["date"] <= cutoff]
-        return float(past.iloc[-1]["value"]) if not past.empty else None
-
-    recent["year_ago"] = recent["date"].apply(_year_ago)
-    recent["yoy_chg"]  = (recent["value"] - recent["year_ago"]).round(1)
-    recent["yoy_pct"]  = (recent["yoy_chg"] / recent["year_ago"] * 100).round(1)
-    recent["date"]     = recent["date"].dt.strftime("%b %d, %Y")
+    recent["prior_week"] = recent["value"].shift(-1)
+    recent["wow_chg"]    = (recent["value"] - recent["prior_week"]).round(1)
+    recent["wow_pct"]    = (recent["wow_chg"] / recent["prior_week"] * 100).round(1)
+    recent["date"]       = recent["date"].dt.strftime("%b %d, %Y")
 
     display = recent.rename(columns={
         "date":     "Week",
         "value":    display_units,
-        "year_ago": "Year Ago",
-        "yoy_chg":  "Chg vs Year Ago",
-        "yoy_pct":  "% Chg",
-    }).reset_index(drop=True)
+        "wow_chg":  "Chg vs Prior Week",
+        "wow_pct":  "% Chg",
+    })[["Week", display_units, "Chg vs Prior Week", "% Chg"]].reset_index(drop=True)
 
     st.dataframe(display, use_container_width=True, hide_index=True)
 
 # ---------------------------------------------------------------------------
-# Section renderer (shared by Production, Imports, Refinery)
+# Single-chart renderer — returns df for the data table (None on error)
 # ---------------------------------------------------------------------------
 
-def render_series_section(
-    series_key: str,
+def render_single_chart(
+    key: str,
     chart_type: str,
     years: list,
     show_5yr: bool,
     api_key: str,
-) -> None:
-    meta = SERIES[series_key]
-    with st.spinner("Loading data…"):
+    padd_chart_type: str = "Timeline",
+) -> pd.DataFrame | None:
+    if key == "padd":
+        render_chart_title("Crude Oil Stocks — PADD Breakdown")
+        with st.spinner("Loading…"):
+            try:
+                padd_df = get_padd_stocks(api_key)
+            except Exception as e:
+                st.error(f"EIA API error: {e}")
+                return None
+        filtered = build_padd_timeline(padd_df, years=years or None)
+        fig = build_padd_chart(filtered, padd_chart_type)
+        st.plotly_chart(fig, use_container_width=True)
+        return padd_df[padd_df["area"] == "PADD 3 (Gulf Coast)"].copy()
+
+    meta = SERIES[key]
+    render_chart_title(meta["label"])
+    with st.spinner("Loading…"):
         try:
-            df = get_series(series_key, api_key)
+            df = get_series(key, api_key)
         except Exception as e:
             st.error(f"EIA API error: {e}")
-            st.stop()
-
-    render_chart_title(meta["label"])
-    render_metrics(df, meta["display_units"])
+            return None
 
     if chart_type == "Seasonality":
         data = build_seasonality_data(df, years=years or None)
@@ -349,9 +319,7 @@ def render_series_section(
         fig  = build_timeline_chart(data, meta["display_units"])
 
     st.plotly_chart(fig, use_container_width=True)
-
-    with st.expander("Recent data (last 52 weeks)"):
-        render_data_table(df, meta["display_units"])
+    return df
 
 # ---------------------------------------------------------------------------
 # Main
@@ -370,85 +338,79 @@ def main() -> None:
     # ---- Sidebar ----------------------------------------------------------------
     st.sidebar.header("Settings")
 
-    section = st.sidebar.radio(
-        "Section",
-        ["Crude Stocks", "Crude Production", "Crude Imports", "Refinery"],
-        index=0,
-    )
+    all_labels = [label for label, _ in SERIES_OPTIONS]
+    default_labels = ["U.S. Crude Stocks", "Crude Production", "Crude Imports"]
+    selected_labels = st.sidebar.multiselect("Series", all_labels, default=default_labels)
+    selected_keys = [LABEL_TO_KEY[l] for l in selected_labels]
 
-    geo = None
-    if section == "Crude Stocks":
-        geo = st.sidebar.radio(
-            "Geography",
-            ["US Total", "Cushing, OK", "PADD Breakdown"],
-            horizontal=True,
-            index=0,
+    has_padd     = "padd" in selected_keys
+    has_non_padd = any(k != "padd" for k in selected_keys)
+
+    padd_chart_type = "Timeline"
+    if has_padd:
+        padd_chart_type = st.sidebar.radio(
+            "PADD chart type", ["Timeline", "Stacked Timeline"], horizontal=True, index=0
         )
 
-    refinery_metric = None
-    if section == "Refinery":
-        refinery_metric = st.sidebar.radio(
-            "Metric",
-            ["Crude Inputs (kb/d)", "Utilization (%)"],
-            horizontal=True,
-            index=0,
-        )
-
-    is_padd = (section == "Crude Stocks" and geo == "PADD Breakdown")
-    if is_padd:
-        chart_type = st.sidebar.radio(
-            "Chart type", ["Timeline", "Stacked Timeline"], horizontal=True, index=0
-        )
-        show_5yr = False
-    else:
+    chart_type = "Seasonality"
+    show_5yr   = False
+    if has_non_padd:
         chart_type = st.sidebar.radio(
             "Chart type", ["Seasonality", "Timeline"], horizontal=True, index=0
         )
-        show_5yr = (
-            st.sidebar.checkbox("Show 5-year average", value=True)
-            if chart_type == "Seasonality"
-            else False
-        )
+        if chart_type == "Seasonality":
+            show_5yr = st.sidebar.checkbox("Show 5-year average", value=True)
 
     st.sidebar.divider()
 
     cur = pd.Timestamp.today().year
-    all_years = list(range(2000, cur + 1))
+    all_years     = list(range(2000, cur + 1))
     default_years = list(range(cur - 4, cur + 1))
     years = st.sidebar.multiselect("Years", all_years, default=default_years, key="years")
 
     # ---- Main area --------------------------------------------------------------
+    if not selected_keys:
+        st.info("Select one or more series from the sidebar.")
+        return
 
-    if section == "Crude Stocks":
-        if geo == "PADD Breakdown":
-            with st.spinner("Loading PADD data…"):
-                try:
-                    padd_df = get_padd_stocks(api_key)
-                except Exception as e:
-                    st.error(f"EIA API error: {e}")
-                    st.stop()
-            padd_filtered = build_padd_timeline(padd_df, years=years or None)
-            render_chart_title("Crude Oil Stocks — PADD Breakdown")
-            fig = build_padd_chart(padd_filtered, chart_type)
-            st.plotly_chart(fig, use_container_width=True)
-            with st.expander("Recent data (last 52 weeks)"):
-                render_data_table(
-                    padd_df[padd_df["area"] == "PADD 3 (Gulf Coast)"].copy(),
-                    "Million Barrels",
+    # Render in rows of up to 4 charts; data table expander after each row
+    for row_start in range(0, len(selected_keys), 4):
+        row_keys = selected_keys[row_start : row_start + 4]
+        cols     = st.columns(len(row_keys))
+        row_dfs: dict[str, pd.DataFrame] = {}
+
+        for col, key in zip(cols, row_keys):
+            with col:
+                df = render_single_chart(
+                    key,
+                    padd_chart_type if key == "padd" else chart_type,
+                    years,
+                    show_5yr,
+                    api_key,
+                    padd_chart_type,
                 )
-        else:
-            series_key = "stocks_us" if geo == "US Total" else "stocks_cushing"
-            render_series_section(series_key, chart_type, years, show_5yr, api_key)
+                if df is not None:
+                    row_dfs[key] = df
 
-    elif section == "Crude Production":
-        render_series_section("production", chart_type, years, show_5yr, api_key)
+        valid_keys = [k for k in row_keys if k in row_dfs]
+        if not valid_keys:
+            continue
 
-    elif section == "Crude Imports":
-        render_series_section("imports", chart_type, years, show_5yr, api_key)
-
-    else:  # Refinery
-        series_key = "refinery_inputs" if refinery_metric == "Crude Inputs (kb/d)" else "refinery_util"
-        render_series_section(series_key, chart_type, years, show_5yr, api_key)
+        with st.expander("Recent data (last 52 weeks)"):
+            if len(valid_keys) == 1:
+                k = valid_keys[0]
+                units = "Million Barrels" if k == "padd" else SERIES[k]["display_units"]
+                render_data_table(row_dfs[k], units)
+            else:
+                short_labels = [
+                    "PADD 3 (Gulf Coast)" if k == "padd" else SERIES[k]["label"]
+                    for k in valid_keys
+                ]
+                tabs = st.tabs(short_labels)
+                for tab, k in zip(tabs, valid_keys):
+                    with tab:
+                        units = "Million Barrels" if k == "padd" else SERIES[k]["display_units"]
+                        render_data_table(row_dfs[k], units)
 
 
 if __name__ == "__main__":
