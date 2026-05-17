@@ -32,7 +32,7 @@ def get_series_cached(series_key: str, api_key: str) -> pd.DataFrame:
     """Return full history for a named series, updating the local cache."""
     cached = _load(series_key)
 
-    if cached is None:
+    if cached is None or cached.empty:
         df = fetch_series(series_key, api_key)
         _save(series_key, df)
         return df
@@ -55,7 +55,7 @@ def get_padd_cached(api_key: str) -> pd.DataFrame:
     """Return full PADD stocks history, updating the local cache."""
     cached = _load("padd_stocks")
 
-    if cached is None:
+    if cached is None or cached.empty:
         df = fetch_padd_stocks(api_key)
         _save("padd_stocks", df)
         return df
