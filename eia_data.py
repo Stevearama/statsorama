@@ -66,6 +66,18 @@ def _parse_v1_response(payload: dict, scale) -> pd.DataFrame:
     return df.dropna(subset=["value"]).sort_values("date").reset_index(drop=True)
 
 
+def _raise_with_detail(resp: requests.Response) -> None:
+    """Raise an HTTPError that includes the response body — useful for debugging API errors."""
+    try:
+        body = resp.json()
+    except Exception:
+        body = resp.text[:500]
+    raise requests.HTTPError(
+        f"EIA API returned {resp.status_code}: {body}",
+        response=resp,
+    )
+
+
 def fetch_series(series_key: str, api_key: str) -> pd.DataFrame:
     """Fetch full history for a named weekly series from the EIA v1 API."""
     meta = SERIES[series_key]
@@ -74,7 +86,8 @@ def fetch_series(series_key: str, api_key: str) -> pd.DataFrame:
         params={"api_key": api_key, "series_id": meta["id"], "out": "json"},
         timeout=30,
     )
-    resp.raise_for_status()
+    if not resp.ok:
+        _raise_with_detail(resp)
     return _parse_v1_response(resp.json(), meta["scale"])
 
 
@@ -91,13 +104,15 @@ def fetch_series_since(series_key: str, api_key: str, since: pd.Timestamp) -> pd
         },
         timeout=30,
     )
-    resp.raise_for_status()
+    if not resp.ok:
+        _raise_with_detail(resp)
     return _parse_v1_response(resp.json(), meta["scale"])
 
 
 def _fetch_padd(params: list) -> pd.DataFrame:
     resp = requests.get(_V2_STOCKS_URL, params=params, timeout=30)
-    resp.raise_for_status()
+    if not resp.ok:
+        _raise_with_detail(resp)
     records = resp.json().get("response", {}).get("data", [])
     if not records:
         return pd.DataFrame(columns=["date", "area", "value"])
