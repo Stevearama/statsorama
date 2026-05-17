@@ -220,7 +220,7 @@ def build_seasonality_chart(
             hovertemplate="%{x|%d %b} · %{y:,.1f} " + display_units + "<extra>" + str(year) + "</extra>",
         ))
 
-    today_plot = pd.Timestamp.today().replace(year=2000).normalize().strftime("%Y-%m-%d")
+    today_plot = pd.Timestamp.today().replace(year=2004).normalize().strftime("%Y-%m-%d")
     _add_today_vline(fig, today_plot)
     _apply_base_layout(fig, display_units, hovermode="x", x_tickformat="%b", x_dtick="M1")
     return fig

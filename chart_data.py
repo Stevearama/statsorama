@@ -2,8 +2,9 @@ import pandas as pd
 
 
 def _iso_week_to_plot_date(week: int) -> pd.Timestamp:
-    """Return a consistent x-axis date for a given ISO week number, anchored to year 2000."""
-    return pd.Timestamp.fromisocalendar(2000, int(week), 5)  # Friday of that week
+    """Return a consistent x-axis date for a given ISO week number, anchored to year 2004.
+    2004 has 53 ISO weeks so all valid week numbers (1-53) are handled correctly."""
+    return pd.Timestamp.fromisocalendar(2004, int(week), 5)  # Friday of that week
 
 
 def build_seasonality_data(df: pd.DataFrame, years: list = None) -> pd.DataFrame:
