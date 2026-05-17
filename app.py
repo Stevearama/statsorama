@@ -76,6 +76,9 @@ def render_chart_title(text: str) -> None:
 
 def render_metrics(df: pd.DataFrame, display_units: str) -> None:
     """Four headline metrics: latest, year-ago delta, 4-week avg, 5-year avg."""
+    if df.empty:
+        st.warning("No data returned from EIA API.")
+        return
     latest = df.iloc[-1]
     latest_val = float(latest["value"])
     latest_date = pd.Timestamp(latest["date"])

@@ -54,12 +54,20 @@ PADD_AREAS = {
 }
 
 
-def _parse_v1_response(payload: dict, scale) -> pd.DataFrame:
-    if "series" not in payload or not payload["series"]:
+def _parse_response(payload: dict, scale) -> pd.DataFrame:
+    """Parse either v1-format (series[0].data) or v2-format (response.data) EIA responses."""
+    if "series" in payload and payload["series"]:
+        # v1 / backward-compat format: [["2024-01-05", 12345], ...]
+        raw = payload["series"][0]["data"]
+        df = pd.DataFrame(raw, columns=["date", "value"])
+    elif "response" in payload and payload["response"].get("data"):
+        # v2 native format: [{"period": "2024-01-05", "value": 12345, ...}, ...]
+        df = pd.DataFrame(payload["response"]["data"])
+        df = df.rename(columns={"period": "date"})[["date", "value"]]
+    else:
         return pd.DataFrame(columns=["date", "value"])
-    raw = payload["series"][0]["data"]
-    df = pd.DataFrame(raw, columns=["date", "value"])
-    df["date"] = pd.to_datetime(df["date"])
+
+    df["date"]  = pd.to_datetime(df["date"])
     df["value"] = pd.to_numeric(df["value"], errors="coerce")
     if scale:
         df["value"] = df["value"] / scale
@@ -83,12 +91,12 @@ def fetch_series(series_key: str, api_key: str) -> pd.DataFrame:
     meta = SERIES[series_key]
     resp = requests.get(
         f"{_V2_SERIESID_URL}{meta['id']}",
-        params={"api_key": api_key},
+        params={"api_key": api_key, "data[0]": "value", "length": "5000"},
         timeout=30,
     )
     if not resp.ok:
         _raise_with_detail(resp)
-    return _parse_v1_response(resp.json(), meta["scale"])
+    return _parse_response(resp.json(), meta["scale"])
 
 
 def fetch_series_since(series_key: str, api_key: str, since: pd.Timestamp) -> pd.DataFrame:
@@ -96,12 +104,12 @@ def fetch_series_since(series_key: str, api_key: str, since: pd.Timestamp) -> pd
     meta = SERIES[series_key]
     resp = requests.get(
         f"{_V2_SERIESID_URL}{meta['id']}",
-        params={"api_key": api_key, "start": since.strftime("%Y%m%d")},
+        params={"api_key": api_key, "data[0]": "value", "start": since.strftime("%Y%m%d")},
         timeout=30,
     )
     if not resp.ok:
         _raise_with_detail(resp)
-    return _parse_v1_response(resp.json(), meta["scale"])
+    return _parse_response(resp.json(), meta["scale"])
 
 
 def _fetch_padd(params: list) -> pd.DataFrame:
