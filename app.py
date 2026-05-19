@@ -378,8 +378,8 @@ def _padd_table(api_key: str) -> None:
 
 def _nav_buttons() -> None:
     section_label("Explore detail charts")
-    # st.page_link navigates to the Charts page (requires Streamlit ≥ 1.31)
-    st.page_link("pages/1_Charts.py", label="Open detail charts →", icon="📈")
+    if st.button("Open detail charts →", type="primary"):
+        st.switch_page("pages/1_Charts.py")
 
 # ---------------------------------------------------------------------------
 # Main

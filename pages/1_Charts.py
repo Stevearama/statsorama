@@ -145,7 +145,8 @@ def main() -> None:
     years = st.sidebar.multiselect("Years", all_years, default=default_years, key="years")
 
     st.sidebar.markdown("---")
-    st.sidebar.page_link("app.py", label="← Back to summary", icon="🏠")
+    if st.sidebar.button("← Back to summary"):
+        st.switch_page("app.py")
 
     # ── Chart grid ───────────────────────────────────────────────────────────
     if not selected_keys:
