@@ -1,325 +1,385 @@
+"""Summary / home page — Weekly EIA petroleum snapshot."""
+
 import streamlit as st
-import plotly.graph_objects as go
 import pandas as pd
 
 from eia_data import SERIES, PADD_AREAS
 from data_cache import get_series_cached, get_padd_cached
-from chart_data import (
-    build_seasonality_data,
-    build_5yr_avg,
-    build_timeline_data,
-    build_padd_timeline,
-)
-
-# ---------------------------------------------------------------------------
-# Palette — identical to UnitDown for visual consistency
-# ---------------------------------------------------------------------------
-
-PALETTE = [
-    "#0047AB",  # cobalt blue
-    "#CC0000",  # red
-    "#00827F",  # teal
-    "#E65C00",  # orange
-    "#5C2D91",  # purple
-    "#2E7D32",  # dark green
-    "#8B4513",  # saddle brown
-    "#1A237E",  # navy
-]
-
-# Ordered list of selectable series for the sidebar
-SERIES_OPTIONS = [
-    ("U.S. Crude Stocks",     "stocks_us"),
-    ("Cushing, OK Stocks",    "stocks_cushing"),
-    ("PADD Breakdown",        "padd"),
-    ("Crude Production",      "production"),
-    ("Crude Imports",         "imports"),
-    ("Refinery Crude Inputs", "refinery_inputs"),
-    ("Refinery Utilization",  "refinery_util"),
-]
-LABEL_TO_KEY = {label: key for label, key in SERIES_OPTIONS}
-KEY_TO_LABEL = {key: label for label, key in SERIES_OPTIONS}
+from ui import render_header, section_label
 
 # ---------------------------------------------------------------------------
 # Data loading (cached)
 # ---------------------------------------------------------------------------
 
 @st.cache_data(ttl=3600)
-def get_series(series_key: str, api_key: str) -> pd.DataFrame:
-    return get_series_cached(series_key, api_key)
+def _series(key: str, api_key: str) -> pd.DataFrame:
+    try:
+        return get_series_cached(key, api_key)
+    except Exception:
+        return pd.DataFrame(columns=["date", "value"])
 
 
 @st.cache_data(ttl=3600)
-def get_padd_stocks(api_key: str) -> pd.DataFrame:
-    return get_padd_cached(api_key)
+def _padd(api_key: str) -> pd.DataFrame:
+    try:
+        return get_padd_cached(api_key)
+    except Exception:
+        return pd.DataFrame(columns=["date", "area", "value"])
 
 # ---------------------------------------------------------------------------
-# Layout helpers
+# Stat helpers
 # ---------------------------------------------------------------------------
 
-def render_header(title: str, subtitle: str) -> None:
+def _latest(df: pd.DataFrame) -> tuple:
+    """Return (value, date, wow_change) or (None, None, None) if empty."""
+    if df.empty or len(df) < 1:
+        return None, None, None
+    latest = df.iloc[-1]
+    val  = float(latest["value"])
+    date = pd.Timestamp(latest["date"])
+    wow  = float(df.iloc[-1]["value"] - df.iloc[-2]["value"]) if len(df) >= 2 else None
+    return val, date, wow
+
+
+def _gauge_stats(df: pd.DataFrame) -> dict | None:
+    """Compute inventory gauge statistics vs 5-year same-week history."""
+    if df.empty or len(df) < 2:
+        return None
+
+    latest     = df.iloc[-1]
+    current    = float(latest["value"])
+    curr_date  = pd.Timestamp(latest["date"])
+    wow_chg    = current - float(df.iloc[-2]["value"])
+
+    year_ago_cut = curr_date - pd.DateOffset(years=1)
+    past         = df[df["date"] <= year_ago_cut]
+    yoy_chg      = (current - float(past.iloc[-1]["value"])) if not past.empty else None
+
+    this_week = curr_date.isocalendar().week
+    this_year = curr_date.year
+    hist = df[
+        (df["date"].dt.isocalendar().week == this_week) &
+        (df["date"].dt.year >= this_year - 5) &
+        (df["date"].dt.year <  this_year)
+    ]
+
+    if hist.empty:
+        return {"current": current, "wow_chg": wow_chg, "yoy_chg": yoy_chg,
+                "pct_vs_5yr": None, "gauge_pct": 50}
+
+    avg = float(hist["value"].mean())
+    lo  = float(hist["value"].min())
+    hi  = float(hist["value"].max())
+    pct = (current - avg) / avg * 100 if avg else None
+    gp  = max(0, min(100, (current - lo) / (hi - lo) * 100)) if hi != lo else 50
+
+    return {"current": current, "wow_chg": wow_chg, "yoy_chg": yoy_chg,
+            "pct_vs_5yr": pct, "gauge_pct": gp}
+
+# ---------------------------------------------------------------------------
+# Rendered components
+# ---------------------------------------------------------------------------
+
+def _price_strip(api_key: str) -> None:
+    """Top bar: latest week date + WTI / retail gas / retail diesel."""
+    df_wti = _series("wti_spot",       api_key)
+    df_gas = _series("gasoline_retail", api_key)
+    df_dsl = _series("diesel_retail",  api_key)
+
+    def _fmt_price(df, prefix="$", decimals=2):
+        if df.empty:
+            return "—", None
+        val, _, wow = _latest(df)
+        val_str = f"{prefix}{val:,.{decimals}f}"
+        return val_str, wow
+
+    wti_str, wti_wow   = _fmt_price(df_wti,  decimals=2)
+    gas_str, gas_wow   = _fmt_price(df_gas,  decimals=3)
+    dsl_str, dsl_wow   = _fmt_price(df_dsl,  decimals=3)
+
+    def _chg_span(wow, suffix=""):
+        if wow is None:
+            return ""
+        sign  = "▲" if wow > 0 else "▼"
+        color = "#b91c1c" if wow > 0 else "#15803d"
+        return (f"<span style='color:{color};font-size:11px;margin-left:4px;'>"
+                f"{sign} {abs(wow):,.3f}{suffix} wk</span>")
+
+    # Latest data date from whichever series has it
+    snap_date = ""
+    for df in [df_wti, df_gas, df_dsl]:
+        if not df.empty:
+            snap_date = pd.Timestamp(df.iloc[-1]["date"]).strftime("Week ended %b %-d, %Y")
+            break
+
+    items = [
+        ("WTI spot",       wti_str, _chg_span(wti_wow, "")),
+        ("Retail regular", gas_str, _chg_span(gas_wow, "")),
+        ("Retail diesel",  dsl_str, _chg_span(dsl_wow, "")),
+    ]
+    price_html = "".join(
+        f"<div style='text-align:right;'>"
+        f"<span style='font-size:11px;color:#999;display:block;margin-bottom:2px;'>{lbl}</span>"
+        f"<span style='font-size:14px;font-weight:600;'>{val}{chg}</span>"
+        f"</div>"
+        for lbl, val, chg in items
+    )
+
     st.markdown(
-        f"""
-        <style>
-        [data-testid="stToolbarActions"] {{display: none;}}
-        .block-container {{padding-top: 3.5rem;}}
-        </style>
-        <h1 style='font-family:"Arial Black",Arial,sans-serif;
-                   color:#000000; margin-bottom:2px; font-size:2rem;
-                   padding-top:0.6rem; line-height:1.3; overflow:visible;'>
-            {title}
-        </h1>
-        <p style='color:#555555; font-size:15px; margin-top:0; margin-bottom:10px;'>
-            {subtitle}
-        </p>
-        <hr style='border:none; border-top:3px solid #E3120B; margin-bottom:24px;'>
-        """,
+        f"""<div style='display:flex;align-items:center;justify-content:space-between;
+                        padding-bottom:12px;border-bottom:1px solid #ddd;margin-bottom:16px;'>
+              <div style='display:flex;align-items:baseline;gap:10px;'>
+                <span style='font-size:15px;font-weight:600;'>Weekly snapshot</span>
+                <span style='font-size:12px;color:#777;'>{snap_date}</span>
+              </div>
+              <div style='display:flex;gap:24px;'>{price_html}</div>
+            </div>""",
         unsafe_allow_html=True,
     )
 
 
-def render_chart_title(text: str) -> None:
+def _kpi_card(label: str, val, units: str, wow) -> str:
+    """Return HTML for a single KPI card (refinery activity row)."""
+    val_str = f"{val:,.0f}" if val is not None else "—"
+    if wow is not None:
+        sign  = "+" if wow >= 0 else ""
+        color = "#b91c1c" if wow >= 0 else "#15803d"
+        sub   = (f"<div style='font-size:11px;margin-top:3px;color:{color};'>"
+                 f"{sign}{wow:,.0f} vs last wk</div>")
+    else:
+        sub = "<div style='font-size:11px;margin-top:3px;color:#999;'>—</div>"
+
+    return (
+        f"<div style='background:#ede9e0;border-radius:8px;padding:10px 12px;'>"
+        f"<div style='font-size:11px;color:#666;margin-bottom:3px;'>{label}</div>"
+        f"<div style='font-size:19px;font-weight:600;line-height:1.2;'>"
+        f"{val_str}<span style='font-size:11px;color:#999;font-weight:400;'> {units}</span></div>"
+        f"{sub}</div>"
+    )
+
+
+def _refinery_kpis(api_key: str) -> None:
+    section_label("Refinery activity")
+    keys = ["refinery_inputs", "refinery_util", "prod_gasoline",
+            "prod_distillate", "production", "imports"]
+    dfs  = {k: _series(k, api_key) for k in keys}
+
+    def _kv(key):
+        val, _, wow = _latest(dfs[key])
+        return val, wow
+
+    cards = [
+        ("Crude inputs",        *_kv("refinery_inputs"),  SERIES["refinery_inputs"]["display_units"]),
+        ("Utilization",         *_kv("refinery_util"),    SERIES["refinery_util"]["display_units"]),
+        ("Gasoline production", *_kv("prod_gasoline"),    SERIES["prod_gasoline"]["display_units"]),
+        ("Distillate prod.",    *_kv("prod_distillate"),  SERIES["prod_distillate"]["display_units"]),
+        ("Crude production",    *_kv("production"),       SERIES["production"]["display_units"]),
+        ("Crude imports",       *_kv("imports"),          SERIES["imports"]["display_units"]),
+    ]
+
+    html = "".join(_kpi_card(lbl, val, units, wow) for lbl, val, wow, units in cards)
     st.markdown(
-        f"<h3 style='font-family:\"Arial Black\",Arial,sans-serif; "
-        f"color:#000000; font-size:1.1rem; margin-bottom:4px;'>{text}</h3>",
+        f"<div style='display:grid;grid-template-columns:repeat(6,1fr);gap:8px;"
+        f"margin-bottom:22px;'>{html}</div>",
         unsafe_allow_html=True,
     )
 
-# ---------------------------------------------------------------------------
-# Shared chart layout
-# ---------------------------------------------------------------------------
 
-def _apply_base_layout(
-    fig: go.Figure,
-    y_title: str,
-    hovermode: str = "x",
-    x_tickformat: str = None,
-    x_dtick: str = None,
-    height: int = 360,
-) -> None:
-    xaxis = dict(
-        showgrid=False,
-        showline=True,
-        linecolor="#000000",
-        linewidth=1.5,
-        ticks="outside",
-        ticklen=5,
-        tickfont=dict(color="#000000", size=11),
-    )
-    if x_tickformat:
-        xaxis["tickformat"] = x_tickformat
-    if x_dtick:
-        xaxis["dtick"] = x_dtick
-
-    fig.update_layout(
-        height=height,
-        plot_bgcolor="white",
-        paper_bgcolor="white",
-        font=dict(family="Arial", size=11, color="#000000"),
-        xaxis=xaxis,
-        yaxis=dict(
-            title=dict(text=y_title, font=dict(color="#000000", size=11)),
-            tickfont=dict(color="#000000", size=11),
-            showgrid=True,
-            gridcolor="#E8E8E8",
-            gridwidth=1,
-            showline=False,
-            zeroline=False,
-            tickformat=",",
-        ),
-        legend=dict(
-            orientation="h",
-            y=-0.18,
-            x=0,
-            title_text="",
-            font=dict(size=10, color="#000000"),
-        ),
-        margin=dict(l=60, r=10, t=30, b=80),
-        hovermode=hovermode,
-    )
-
-
-def _add_today_vline(fig: go.Figure, x_val: str, label: bool = True) -> None:
-    fig.add_vline(x=x_val, line_dash="dash", line_color="#555555", line_width=1.5)
-    if label:
-        fig.add_annotation(
-            x=x_val, y=1.05, yref="paper", text="Today",
-            showarrow=False, font=dict(size=10, color="#555555"), xanchor="center",
+def _inv_card(label: str, stats: dict | None, units: str) -> str:
+    """Return HTML for one inventory gauge card."""
+    if stats is None:
+        return (
+            f"<div style='background:#fff;border:1px solid #e5e5e5;border-radius:10px;"
+            f"padding:12px 14px;'>"
+            f"<div style='font-size:12px;color:#666;margin-bottom:4px;'>{label}</div>"
+            f"<div style='font-size:14px;color:#aaa;'>Data not yet cached</div>"
+            f"</div>"
         )
 
-# ---------------------------------------------------------------------------
-# Chart builders
-# ---------------------------------------------------------------------------
+    pct  = stats["pct_vs_5yr"]
+    gp   = stats["gauge_pct"]
+    cur  = stats["current"]
+    wow  = stats["wow_chg"]
+    yoy  = stats["yoy_chg"]
 
-def build_seasonality_chart(
-    data: pd.DataFrame,
-    display_units: str,
-    show_5yr: bool,
-    all_df: pd.DataFrame,
-) -> go.Figure:
-    fig = go.Figure()
-    current_year = pd.Timestamp.today().year
-    years = sorted(data["year"].unique())
-
-    if show_5yr:
-        avg_df = build_5yr_avg(all_df, current_year)
-        if not avg_df.empty:
-            fig.add_trace(go.Scatter(
-                x=avg_df["plot_date"],
-                y=avg_df["value"],
-                mode="lines",
-                name="5-year avg",
-                line=dict(color="#AAAAAA", width=1.5, dash="dash"),
-                hovertemplate="%{x|%d %b} · %{y:,.1f} " + display_units + "<extra>5-yr avg</extra>",
-            ))
-
-    for i, year in enumerate(years):
-        year_data = data[data["year"] == year].sort_values("plot_date")
-        fig.add_trace(go.Scatter(
-            x=year_data["plot_date"],
-            y=year_data["value"],
-            mode="lines",
-            name=str(year),
-            line=dict(
-                color=PALETTE[i % len(PALETTE)],
-                width=2.5 if year == current_year else 1.5,
-            ),
-            hovertemplate="%{x|%d %b} · %{y:,.1f} " + display_units + "<extra>" + str(year) + "</extra>",
-        ))
-
-    today_plot = pd.Timestamp.today().replace(year=2004).normalize().strftime("%Y-%m-%d")
-    _add_today_vline(fig, today_plot)
-    _apply_base_layout(fig, display_units, hovermode="x", x_tickformat="%b", x_dtick="M1")
-    return fig
-
-
-def build_timeline_chart(data: pd.DataFrame, display_units: str) -> go.Figure:
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(
-        x=data["date"],
-        y=data["value"],
-        mode="lines",
-        name=display_units,
-        line=dict(color=PALETTE[0], width=2),
-        hovertemplate="%{x|%d %b %Y} · %{y:,.1f} " + display_units + "<extra></extra>",
-    ))
-
-    today = pd.Timestamp.today().normalize()
-    x_min, x_max = data["date"].min(), data["date"].max()
-    if x_min <= today <= x_max:
-        _add_today_vline(fig, today.strftime("%Y-%m-%d"))
-
-    _apply_base_layout(fig, display_units, hovermode="x")
-    return fig
-
-
-def _hex_to_rgba(hex_color: str, alpha: float) -> str:
-    h = hex_color.lstrip("#")
-    r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
-    return f"rgba({r},{g},{b},{alpha})"
-
-
-def build_padd_chart(padd_df: pd.DataFrame, chart_type: str) -> go.Figure:
-    fig = go.Figure()
-    areas = sorted(padd_df["area"].unique())
-    display_units = "Million Barrels"
-
-    for i, area in enumerate(areas):
-        area_data = padd_df[padd_df["area"] == area].sort_values("date")
-        color = PALETTE[i % len(PALETTE)]
-        if chart_type == "Stacked Timeline":
-            fig.add_trace(go.Scatter(
-                x=area_data["date"],
-                y=area_data["value"],
-                mode="lines",
-                name=area,
-                stackgroup="one",
-                line=dict(width=0.5, color=color),
-                fillcolor=_hex_to_rgba(color, 0.5),
-                hovertemplate="%{x|%d %b %Y} · %{y:,.1f} " + display_units + "<extra>" + area + "</extra>",
-            ))
-        else:
-            fig.add_trace(go.Scatter(
-                x=area_data["date"],
-                y=area_data["value"],
-                mode="lines",
-                name=area,
-                line=dict(color=color, width=2),
-                hovertemplate="%{x|%d %b %Y} · %{y:,.1f} " + display_units + "<extra>" + area + "</extra>",
-            ))
-
-    today = pd.Timestamp.today().normalize()
-    x_min, x_max = padd_df["date"].min(), padd_df["date"].max()
-    if x_min <= today <= x_max:
-        _add_today_vline(fig, today.strftime("%Y-%m-%d"))
-
-    _apply_base_layout(fig, display_units, hovermode="x unified")
-    return fig
-
-# ---------------------------------------------------------------------------
-# Data table
-# ---------------------------------------------------------------------------
-
-def render_data_table(df: pd.DataFrame, display_units: str) -> None:
-    """Show the most recent 52 weeks with week-over-week comparison."""
-    recent = df.tail(52).copy().sort_values("date", ascending=False)
-
-    recent["prior_week"] = recent["value"].shift(-1)
-    recent["wow_chg"]    = (recent["value"] - recent["prior_week"]).round(1)
-    recent["wow_pct"]    = (recent["wow_chg"] / recent["prior_week"] * 100).round(1)
-    recent["date"]       = recent["date"].dt.strftime("%b %d, %Y")
-
-    display = recent.rename(columns={
-        "date":     "Week",
-        "value":    display_units,
-        "wow_chg":  "Chg vs Prior Week",
-        "wow_pct":  "% Chg",
-    })[["Week", display_units, "Chg vs Prior Week", "% Chg"]].reset_index(drop=True)
-
-    st.dataframe(display, use_container_width=True, hide_index=True)
-
-# ---------------------------------------------------------------------------
-# Single-chart renderer — returns df for the data table (None on error)
-# ---------------------------------------------------------------------------
-
-def render_single_chart(
-    key: str,
-    chart_type: str,
-    years: list,
-    show_5yr: bool,
-    api_key: str,
-    padd_chart_type: str = "Timeline",
-) -> pd.DataFrame | None:
-    if key == "padd":
-        render_chart_title("Crude Oil Stocks — PADD Breakdown")
-        with st.spinner("Loading…"):
-            try:
-                padd_df = get_padd_stocks(api_key)
-            except Exception as e:
-                st.error(f"EIA API error: {e}")
-                return None
-        filtered = build_padd_timeline(padd_df, years=years or None)
-        fig = build_padd_chart(filtered, padd_chart_type)
-        st.plotly_chart(fig, use_container_width=True)
-        return padd_df[padd_df["area"] == "PADD 3 (Gulf Coast)"].copy()
-
-    meta = SERIES[key]
-    render_chart_title(meta["label"])
-    with st.spinner("Loading…"):
-        try:
-            df = get_series(key, api_key)
-        except Exception as e:
-            st.error(f"EIA API error: {e}")
-            return None
-
-    if chart_type == "Seasonality":
-        data = build_seasonality_data(df, years=years or None)
-        fig  = build_seasonality_chart(data, meta["display_units"], show_5yr, df)
+    if pct is None:
+        tag  = "<span style='font-size:11px;color:#aaa;'>N/A</span>"
+        bar  = "#aaa"
+    elif pct >= 5:
+        tag  = (f"<span style='font-size:11px;font-weight:600;padding:2px 7px;"
+                f"border-radius:4px;background:#dcfce7;color:#166534;'>+{pct:.1f}%</span>")
+        bar  = "#16a34a"
+    elif pct <= -5:
+        tag  = (f"<span style='font-size:11px;font-weight:600;padding:2px 7px;"
+                f"border-radius:4px;background:#fee2e2;color:#991b1b;'>{pct:.1f}%</span>")
+        bar  = "#dc2626"
     else:
-        data = build_timeline_data(df, years=years or None)
-        fig  = build_timeline_chart(data, meta["display_units"])
+        tag  = (f"<span style='font-size:11px;font-weight:600;padding:2px 7px;"
+                f"border-radius:4px;background:#fef3c7;color:#92400e;'>{pct:+.1f}%</span>")
+        bar  = "#d97706"
 
-    st.plotly_chart(fig, use_container_width=True)
-    return df
+    wow_str = f"{wow:+.1f} {units} wk/wk"  if wow  is not None else "—"
+    yoy_str = f"{yoy:+.1f} vs yr ago"       if yoy  is not None else "—"
+
+    return (
+        f"<div style='background:#fff;border:1px solid #e5e5e5;border-radius:10px;"
+        f"padding:12px 14px;'>"
+        f"<div style='display:flex;justify-content:space-between;align-items:flex-start;"
+        f"margin-bottom:4px;'>"
+        f"<span style='font-size:12px;color:#666;'>{label}</span>{tag}</div>"
+        f"<div style='font-size:18px;font-weight:600;margin-bottom:8px;'>"
+        f"{cur:,.1f} <span style='font-size:12px;font-weight:400;color:#999;'>{units}</span></div>"
+        f"<div style='height:5px;background:#e5e5e5;border-radius:3px;position:relative;margin-bottom:4px;'>"
+        f"<div style='width:{gp:.0f}%;height:100%;background:{bar};border-radius:3px;'></div>"
+        f"<div style='position:absolute;top:-3px;left:50%;width:2px;height:11px;"
+        f"background:#999;border-radius:1px;'></div></div>"
+        f"<div style='display:flex;justify-content:space-between;font-size:10px;"
+        f"color:#bbb;margin-bottom:6px;'><span>5yr low</span><span>5yr avg</span><span>5yr high</span></div>"
+        f"<div style='font-size:11px;color:#888;'>{wow_str} &nbsp;·&nbsp; {yoy_str}</div>"
+        f"</div>"
+    )
+
+
+def _inventory_gauges(api_key: str, geo: str) -> None:
+    section_label("Inventory status — vs 5-year average")
+
+    crude_key  = "stocks_us" if geo == "US Total" else "stocks_cushing"
+    crude_lbl  = "Crude oil (excl. SPR)" if geo == "US Total" else "Cushing crude stocks"
+
+    inv_series = [
+        (crude_lbl,            crude_key,          "mb"),
+        ("Motor gasoline",     "stocks_gasoline",  "mb"),
+        ("Distillate fuel oil","stocks_distillate","mb"),
+        ("Kerosene / jet fuel","stocks_jet",       "mb"),
+        ("Propane / propylene","stocks_propane",   "mb"),
+        ("SPR crude",          "stocks_spr",       "mb"),
+    ]
+
+    cards_html = ""
+    for label, key, units in inv_series:
+        df    = _series(key, api_key)
+        stats = _gauge_stats(df)
+        cards_html += _inv_card(label, stats, units)
+
+    st.markdown(
+        f"<div style='display:grid;grid-template-columns:repeat(3,1fr);gap:10px;"
+        f"margin-bottom:22px;'>{cards_html}</div>",
+        unsafe_allow_html=True,
+    )
+
+
+def _movers_panel(api_key: str) -> None:
+    """Biggest week-over-week movers across loaded series."""
+    watch = [
+        ("stocks_us",          "Crude oil stocks",       "mb"),
+        ("stocks_gasoline",    "Gasoline stocks",        "mb"),
+        ("stocks_distillate",  "Distillate stocks",      "mb"),
+        ("stocks_jet",         "Jet fuel stocks",        "mb"),
+        ("stocks_propane",     "Propane stocks",         "mb"),
+        ("production",         "Crude production",       "kb/d"),
+        ("imports",            "Crude imports",          "kb/d"),
+        ("refinery_inputs",    "Refinery inputs",        "kb/d"),
+        ("refinery_util",      "Refinery utilization",   "%"),
+    ]
+    rows = []
+    for key, label, units in watch:
+        df = _series(key, api_key)
+        if df.empty or len(df) < 2:
+            continue
+        val, _, wow = _latest(df)
+        if wow is None:
+            continue
+        rows.append((label, units, wow, val))
+
+    if not rows:
+        st.caption("No mover data available yet.")
+        return
+
+    rows.sort(key=lambda r: abs(r[2]), reverse=True)
+
+    html_rows = ""
+    for label, units, wow, val in rows[:6]:
+        sign  = "▲" if wow >= 0 else "▼"
+        color = "#b91c1c" if wow >= 0 else "#15803d"
+        html_rows += (
+            f"<div style='display:flex;justify-content:space-between;align-items:center;"
+            f"padding:7px 0;border-bottom:1px solid #f0f0f0;'>"
+            f"<div><div style='font-size:12px;font-weight:500;'>{label}</div>"
+            f"<div style='font-size:11px;color:#888;'>now {val:,.1f} {units}</div></div>"
+            f"<div style='text-align:right;'>"
+            f"<div style='font-size:13px;font-weight:600;color:{color};'>"
+            f"{sign} {abs(wow):,.1f} {units}</div></div></div>"
+        )
+
+    st.markdown(
+        f"<div style='background:#fff;border:1px solid #e5e5e5;border-radius:10px;"
+        f"padding:14px 16px;'>"
+        f"<div style='font-size:13px;font-weight:600;margin-bottom:12px;color:#333;'>"
+        f"Biggest movers this week</div>"
+        f"{html_rows}</div>",
+        unsafe_allow_html=True,
+    )
+
+
+def _padd_table(api_key: str) -> None:
+    """PADD crude stocks table — latest week."""
+    df = _padd(api_key)
+    if df.empty:
+        st.caption("PADD data not yet cached.")
+        return
+
+    padd_order = list(PADD_AREAS.keys())
+    rows_html  = ""
+    for area in padd_order:
+        sub = df[df["area"] == area].sort_values("date")
+        if sub.empty:
+            continue
+        cur = float(sub.iloc[-1]["value"])
+        wow = float(sub.iloc[-1]["value"] - sub.iloc[-2]["value"]) if len(sub) >= 2 else None
+
+        wow_html = ""
+        if wow is not None:
+            bg    = "#fee2e2" if wow >= 0 else "#dcfce7"
+            color = "#991b1b" if wow >= 0 else "#166534"
+            sign  = "+" if wow >= 0 else ""
+            wow_html = (f"<span style='display:inline-block;padding:1px 6px;"
+                        f"border-radius:3px;font-size:10px;font-weight:600;"
+                        f"background:{bg};color:{color};'>{sign}{wow:.1f}</span>")
+
+        rows_html += (
+            f"<tr>"
+            f"<td style='padding:6px 8px 6px 0;font-size:12px;color:#555;"
+            f"border-bottom:1px solid #f5f5f5;'>{area}</td>"
+            f"<td style='padding:6px 8px;text-align:right;font-size:12px;"
+            f"border-bottom:1px solid #f5f5f5;font-weight:600;'>{cur:.1f}</td>"
+            f"<td style='padding:6px 0 6px 8px;text-align:right;"
+            f"border-bottom:1px solid #f5f5f5;'>{wow_html}</td>"
+            f"</tr>"
+        )
+
+    st.markdown(
+        f"<div style='background:#fff;border:1px solid #e5e5e5;border-radius:10px;"
+        f"padding:14px 16px;'>"
+        f"<div style='font-size:13px;font-weight:600;margin-bottom:12px;color:#333;'>"
+        f"PADD crude oil stocks</div>"
+        f"<table style='width:100%;border-collapse:collapse;'>"
+        f"<thead><tr>"
+        f"<th style='font-size:11px;color:#999;font-weight:500;padding:0 8px 8px 0;"
+        f"text-align:left;border-bottom:1px solid #eee;'>District</th>"
+        f"<th style='font-size:11px;color:#999;font-weight:500;padding:0 8px 8px;"
+        f"text-align:right;border-bottom:1px solid #eee;'>MMbbl</th>"
+        f"<th style='font-size:11px;color:#999;font-weight:500;padding:0 0 8px 8px;"
+        f"text-align:right;border-bottom:1px solid #eee;'>wk/wk</th>"
+        f"</tr></thead>"
+        f"<tbody>{rows_html}</tbody></table></div>",
+        unsafe_allow_html=True,
+    )
+
+
+def _nav_buttons() -> None:
+    section_label("Explore detail charts")
+    # st.page_link navigates to the Charts page (requires Streamlit ≥ 1.31)
+    st.page_link("pages/1_Charts.py", label="Open detail charts →", icon="📈")
 
 # ---------------------------------------------------------------------------
 # Main
@@ -335,82 +395,28 @@ def main() -> None:
         st.error("EIA API key not found. Add `eia_api_key` to `.streamlit/secrets.toml`.")
         st.stop()
 
-    # ---- Sidebar ----------------------------------------------------------------
+    # ── Sidebar ──────────────────────────────────────────────────────────────
     st.sidebar.header("Settings")
+    geo = st.sidebar.radio(
+        "Crude stocks geography",
+        ["US Total", "Cushing, OK"],
+        horizontal=True,
+        index=0,
+    )
 
-    all_labels = [label for label, _ in SERIES_OPTIONS]
-    default_labels = ["U.S. Crude Stocks", "Crude Production", "Crude Imports"]
-    selected_labels = st.sidebar.multiselect("Series", all_labels, default=default_labels)
-    selected_keys = [LABEL_TO_KEY[l] for l in selected_labels]
+    # ── Summary sections ─────────────────────────────────────────────────────
+    _price_strip(api_key)
+    _refinery_kpis(api_key)
+    _inventory_gauges(api_key, geo)
 
-    has_padd     = "padd" in selected_keys
-    has_non_padd = any(k != "padd" for k in selected_keys)
+    col_l, col_r = st.columns(2)
+    with col_l:
+        _movers_panel(api_key)
+    with col_r:
+        _padd_table(api_key)
 
-    padd_chart_type = "Timeline"
-    if has_padd:
-        padd_chart_type = st.sidebar.radio(
-            "PADD chart type", ["Timeline", "Stacked Timeline"], horizontal=True, index=0
-        )
-
-    chart_type = "Seasonality"
-    show_5yr   = False
-    if has_non_padd:
-        chart_type = st.sidebar.radio(
-            "Chart type", ["Seasonality", "Timeline"], horizontal=True, index=0
-        )
-        if chart_type == "Seasonality":
-            show_5yr = st.sidebar.checkbox("Show 5-year average", value=True)
-
-    st.sidebar.divider()
-
-    cur = pd.Timestamp.today().year
-    all_years     = list(range(2000, cur + 1))
-    default_years = list(range(cur - 4, cur + 1))
-    years = st.sidebar.multiselect("Years", all_years, default=default_years, key="years")
-
-    # ---- Main area --------------------------------------------------------------
-    if not selected_keys:
-        st.info("Select one or more series from the sidebar.")
-        return
-
-    # Render in rows of up to 4 charts; data table expander after each row
-    for row_start in range(0, len(selected_keys), 4):
-        row_keys = selected_keys[row_start : row_start + 4]
-        cols     = st.columns(len(row_keys))
-        row_dfs: dict[str, pd.DataFrame] = {}
-
-        for col, key in zip(cols, row_keys):
-            with col:
-                df = render_single_chart(
-                    key,
-                    padd_chart_type if key == "padd" else chart_type,
-                    years,
-                    show_5yr,
-                    api_key,
-                    padd_chart_type,
-                )
-                if df is not None:
-                    row_dfs[key] = df
-
-        valid_keys = [k for k in row_keys if k in row_dfs]
-        if not valid_keys:
-            continue
-
-        with st.expander("Recent data (last 52 weeks)"):
-            if len(valid_keys) == 1:
-                k = valid_keys[0]
-                units = "Million Barrels" if k == "padd" else SERIES[k]["display_units"]
-                render_data_table(row_dfs[k], units)
-            else:
-                short_labels = [
-                    "PADD 3 (Gulf Coast)" if k == "padd" else SERIES[k]["label"]
-                    for k in valid_keys
-                ]
-                tabs = st.tabs(short_labels)
-                for tab, k in zip(tabs, valid_keys):
-                    with tab:
-                        units = "Million Barrels" if k == "padd" else SERIES[k]["display_units"]
-                        render_data_table(row_dfs[k], units)
+    st.markdown("<div style='margin-top:20px;'></div>", unsafe_allow_html=True)
+    _nav_buttons()
 
 
 if __name__ == "__main__":
