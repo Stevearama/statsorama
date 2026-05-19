@@ -378,8 +378,7 @@ def _padd_table(api_key: str) -> None:
 
 def _nav_buttons() -> None:
     section_label("Explore detail charts")
-    if st.button("Open detail charts →", type="primary"):
-        st.switch_page("pages/1_Charts.py")
+    st.link_button("Open detail charts →", url="Charts", type="primary")
 
 # ---------------------------------------------------------------------------
 # Main
