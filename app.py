@@ -240,26 +240,38 @@ def _inv_card(label: str, stats: dict | None, units: str) -> str:
     )
 
 
+_PADD_FULL = {
+    "PADD 1": "PADD 1 (East Coast)",
+    "PADD 2": "PADD 2 (Midwest)",
+    "PADD 3": "PADD 3 (Gulf Coast)",
+    "PADD 4": "PADD 4 (Rocky Mountain)",
+    "PADD 5": "PADD 5 (West Coast)",
+}
+
+
 def _inventory_gauges(api_key: str, geo: str) -> None:
     section_label("Inventory status — vs 5-year average")
 
-    crude_key  = "stocks_us" if geo == "US Total" else "stocks_cushing"
-    crude_lbl  = "Crude oil (excl. SPR)" if geo == "US Total" else "Cushing crude stocks"
+    if geo == "US Total":
+        crude_lbl = "Crude oil (excl. SPR)"
+        crude_df  = _series("stocks_us", api_key)
+    else:
+        full_name = _PADD_FULL[geo]
+        crude_lbl = f"Crude — {full_name}"
+        padd_all  = _padd(api_key)
+        crude_df  = padd_all[padd_all["area"] == full_name].copy()
 
-    inv_series = [
-        (crude_lbl,            crude_key,          "mb"),
-        ("Motor gasoline",     "stocks_gasoline",  "mb"),
-        ("Distillate fuel oil","stocks_distillate","mb"),
-        ("Kerosene / jet fuel","stocks_jet",       "mb"),
-        ("Propane / propylene","stocks_propane",   "mb"),
-        ("SPR crude",          "stocks_spr",       "mb"),
+    product_series = [
+        ("Motor gasoline",      "stocks_gasoline"),
+        ("Distillate fuel oil", "stocks_distillate"),
+        ("Kerosene / jet fuel", "stocks_jet"),
+        ("Propane / propylene", "stocks_propane"),
+        ("SPR crude",           "stocks_spr"),
     ]
 
-    cards_html = ""
-    for label, key, units in inv_series:
-        df    = _series(key, api_key)
-        stats = _gauge_stats(df)
-        cards_html += _inv_card(label, stats, units)
+    cards_html = _inv_card(crude_lbl, _gauge_stats(crude_df), "mb")
+    for label, key in product_series:
+        cards_html += _inv_card(label, _gauge_stats(_series(key, api_key)), "mb")
 
     st.markdown(
         f"<div style='display:grid;grid-template-columns:repeat(3,1fr);gap:10px;"
@@ -398,8 +410,7 @@ def main() -> None:
     st.sidebar.header("Settings")
     geo = st.sidebar.radio(
         "Crude stocks geography",
-        ["US Total", "Cushing, OK"],
-        horizontal=True,
+        ["US Total", "PADD 1", "PADD 2", "PADD 3", "PADD 4", "PADD 5"],
         index=0,
     )
 
