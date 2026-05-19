@@ -575,7 +575,7 @@ def fetch_fuel_prices(api_key: str, start: str = None) -> pd.DataFrame:
         route="petroleum/pri/gnd",
         api_key=api_key,
         facets={
-            "product":  ["EPMR", "EPD2D"],
+            "product":  ["EPMR", "EPD2DXL0"],  # EPD2DXL0 = ULSD (0-15 ppm), the current retail diesel series
             "duoarea":  ["NUS", "R10", "R20", "R30", "R40", "R50"],
             "process":  ["PTE"],
         },

@@ -118,7 +118,7 @@ def _price_strip(api_key: str, geo: str) -> None:
 
     wti_val, _, wti_wow = _latest(df_wti)
     gas_val, gas_wow    = _latest_fuel("EPMR")
-    dsl_val, dsl_wow    = _latest_fuel("EPD2D")
+    dsl_val, dsl_wow    = _latest_fuel("EPD2DXL0")
 
     def _fmt(val, wow, decimals=3):
         val_str = f"${val:,.{decimals}f}" if val is not None else "—"
