@@ -4,7 +4,7 @@ import streamlit as st
 import pandas as pd
 
 from eia_data import SERIES, PADD_AREAS
-from data_cache import get_series_cached, get_padd_cached
+from data_cache import get_series_cached, get_padd_cached, get_fuel_prices_cached
 from ui import render_header, section_label
 
 # ---------------------------------------------------------------------------
@@ -25,6 +25,25 @@ def _padd(api_key: str) -> pd.DataFrame:
         return get_padd_cached(api_key)
     except Exception:
         return pd.DataFrame(columns=["date", "area", "value"])
+
+
+@st.cache_data(ttl=3600)
+def _fuel_prices(api_key: str) -> pd.DataFrame:
+    try:
+        return get_fuel_prices_cached(api_key)
+    except Exception:
+        return pd.DataFrame(columns=["date", "product", "duoarea", "value"])
+
+
+# Maps sidebar geo label → EIA duoarea code
+_GEO_TO_DUOAREA = {
+    "US Total": "NUS",
+    "PADD 1":   "R10",
+    "PADD 2":   "R20",
+    "PADD 3":   "R30",
+    "PADD 4":   "R40",
+    "PADD 5":   "R50",
+}
 
 # ---------------------------------------------------------------------------
 # Stat helpers
@@ -80,42 +99,52 @@ def _gauge_stats(df: pd.DataFrame) -> dict | None:
 # Rendered components
 # ---------------------------------------------------------------------------
 
-def _price_strip(api_key: str) -> None:
-    """Top bar: latest week date + WTI / retail gas / retail diesel."""
-    df_wti = _series("wti_spot",       api_key)
-    df_gas = _series("gasoline_retail", api_key)
-    df_dsl = _series("diesel_retail",  api_key)
+def _price_strip(api_key: str, geo: str) -> None:
+    """Top bar: latest week date + WTI / retail gas / retail diesel for selected geo."""
+    area  = _GEO_TO_DUOAREA.get(geo, "NUS")
+    df_wti  = _series("wti_spot", api_key)
+    df_fuel = _fuel_prices(api_key)
 
-    def _fmt_price(df, prefix="$", decimals=2):
-        if df.empty:
-            return "—", None
-        val, _, wow = _latest(df)
-        val_str = f"{prefix}{val:,.{decimals}f}"
-        return val_str, wow
+    def _latest_fuel(product: str):
+        sub = df_fuel[
+            (df_fuel["product"]  == product) &
+            (df_fuel["duoarea"] == area)
+        ].sort_values("date")
+        if sub.empty:
+            return None, None
+        val = float(sub.iloc[-1]["value"])
+        wow = float(sub.iloc[-1]["value"] - sub.iloc[-2]["value"]) if len(sub) >= 2 else None
+        return val, wow
 
-    wti_str, wti_wow   = _fmt_price(df_wti,  decimals=2)
-    gas_str, gas_wow   = _fmt_price(df_gas,  decimals=3)
-    dsl_str, dsl_wow   = _fmt_price(df_dsl,  decimals=3)
+    wti_val, _, wti_wow = _latest(df_wti)
+    gas_val, gas_wow    = _latest_fuel("EPMR")
+    dsl_val, dsl_wow    = _latest_fuel("EPD2D")
 
-    def _chg_span(wow, suffix=""):
-        if wow is None:
-            return ""
+    def _fmt(val, wow, decimals=3):
+        val_str = f"${val:,.{decimals}f}" if val is not None else "—"
+        if wow is None or val is None:
+            return val_str, ""
         sign  = "▲" if wow > 0 else "▼"
         color = "#b91c1c" if wow > 0 else "#15803d"
-        return (f"<span style='color:{color};font-size:11px;margin-left:4px;'>"
-                f"{sign} {abs(wow):,.3f}{suffix} wk</span>")
+        chg   = (f"<span style='color:{color};font-size:11px;margin-left:4px;'>"
+                 f"{sign} {abs(wow):.3f} wk</span>")
+        return val_str, chg
 
-    # Latest data date from whichever series has it
+    wti_str, wti_chg = _fmt(wti_val, wti_wow, decimals=2)
+    gas_str, gas_chg = _fmt(gas_val, gas_wow)
+    dsl_str, dsl_chg = _fmt(dsl_val, dsl_wow)
+
     snap_date = ""
-    for df in [df_wti, df_gas, df_dsl]:
+    for df in [df_wti, df_fuel]:
         if not df.empty:
             snap_date = pd.Timestamp(df.iloc[-1]["date"]).strftime("Week ended %b %-d, %Y")
             break
 
+    geo_sfx = "" if geo == "US Total" else f" ({geo})"
     items = [
-        ("WTI spot",       wti_str, _chg_span(wti_wow, "")),
-        ("Retail regular", gas_str, _chg_span(gas_wow, "")),
-        ("Retail diesel",  dsl_str, _chg_span(dsl_wow, "")),
+        ("WTI spot",                   wti_str, wti_chg),
+        (f"Regular gasoline{geo_sfx}", gas_str, gas_chg),
+        (f"Diesel{geo_sfx}",           dsl_str, dsl_chg),
     ]
     price_html = "".join(
         f"<div style='text-align:right;'>"
@@ -415,7 +444,7 @@ def main() -> None:
     )
 
     # ── Summary sections ─────────────────────────────────────────────────────
-    _price_strip(api_key)
+    _price_strip(api_key, geo)
     _refinery_kpis(api_key)
     _inventory_gauges(api_key, geo)
 

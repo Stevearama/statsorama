@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from eia_data import fetch_series, fetch_padd_stocks, fetch_series_since, fetch_padd_stocks_since
+from eia_data import fetch_series, fetch_padd_stocks, fetch_series_since, fetch_padd_stocks_since, fetch_fuel_prices
 
 CACHE_DIR = Path(__file__).parent / "data"
 
@@ -48,6 +48,34 @@ def get_series_cached(series_key: str, api_key: str) -> pd.DataFrame:
 
     combined = pd.concat([cached, new_rows], ignore_index=True).sort_values("date").reset_index(drop=True)
     _save(series_key, combined)
+    return combined
+
+
+def get_fuel_prices_cached(api_key: str) -> pd.DataFrame:
+    """Return full fuel price history (all products × areas), updating the local cache."""
+    cached = _load("fuel_prices")
+
+    if cached is None or cached.empty:
+        df = fetch_fuel_prices(api_key)
+        _save("fuel_prices", df)
+        return df
+
+    latest   = pd.Timestamp(cached["date"].max())
+    new      = fetch_fuel_prices(api_key, start=latest.strftime("%Y-%m-%d"))
+    if new.empty:
+        return cached
+
+    new_rows = new[new["date"] > latest]
+    if new_rows.empty:
+        return cached
+
+    combined = (
+        pd.concat([cached, new_rows], ignore_index=True)
+        .drop_duplicates(subset=["date", "product", "duoarea"])
+        .sort_values("date")
+        .reset_index(drop=True)
+    )
+    _save("fuel_prices", combined)
     return combined
 
 

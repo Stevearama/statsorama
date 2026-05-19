@@ -237,23 +237,33 @@ V2_ROUTES = {
         "note": "EIA reports this as 4-week moving average to smooth week-to-week noise.",
     },
 
-    # ── Retail Fuel Prices ────────────────────────────────────────────────
-    "petroleum/pri/wfr": {
-        "desc":      "Weekly retail motor fuel prices ($/gallon, all grades, all areas)",
+    # ── Retail Fuel Prices (gasoline + diesel) ───────────────────────────────
+    # petroleum/pri/wfr = heating oil + propane ONLY (seasonal, not what we want).
+    # Weekly retail gasoline AND diesel are both in petroleum/pri/gnd.
+    # Diesel series uses EMD_ prefix; gasoline uses EMM_ prefix.
+    "petroleum/pri/gnd": {
+        "desc":      "Weekly retail gasoline and diesel prices ($/gallon) by PADD",
         "frequency": "weekly",
         "value_col": "value",
         "scale":     None,
         "facets": {
             "product": {
-                "EPMR":  "Regular gasoline (all formulations)",
-                "EPMM":  "Midgrade gasoline",
-                "EPMP":  "Premium gasoline",
-                "EPD2D": "No. 2 diesel (retail)",
+                "EPMR":     "Regular gasoline (all-grades average)",
+                "EPMM":     "Midgrade gasoline",
+                "EPMP":     "Premium gasoline",
+                "EPM0":     "Total gasoline (all grades)",
+                "EPD2D":    "No. 2 diesel (ultra-low-sulfur post-Dec 2010)",
+                "EPD2DXL0": "No. 2 diesel low-sulfur (0-15 ppm)",
             },
             "duoarea":  {"NUS": "U.S. total", "R10": "PADD 1", "R20": "PADD 2",
                          "R30": "PADD 3",     "R40": "PADD 4", "R50": "PADD 5"},
-            "process":  {"PTE": "Retail price ($/gal)"},
+            "process":  {"PTE": "Retail sales price ($/gal)"},
         },
+        "note": "Series ID prefixes differ by product: gasoline=EMM_, diesel=EMD_",
+    },
+    "petroleum/pri/wfr": {
+        "desc":      "HEATING OIL + PROPANE weekly retail prices (seasonal Oct-Mar)",
+        "note":      "Not gasoline/diesel. Use petroleum/pri/gnd for those.",
     },
 
     # ── Spot Prices ───────────────────────────────────────────────────────
@@ -390,7 +400,7 @@ SERIES = {
         "scale":         None,
     },
     "diesel_retail": {
-        "id":            "PET.EMM_EPD2D_PTE_NUS_DPG.W",  # verify at opendata browser
+        "id":            "PET.EMD_EPD2D_PTE_NUS_DPG.W",  # EMD prefix, not EMM — confirmed via api
         "label":         "U.S. No. 2 Diesel Retail Price",
         "display_units": "$/gal",
         "scale":         None,
@@ -539,6 +549,40 @@ def fetch_v2(
     return df.dropna(subset=[value_col]).reset_index(drop=True)
 
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Weekly retail fuel prices — gasoline + diesel for all PADDs  (Method B)
+# ---------------------------------------------------------------------------
+# Route:    petroleum/pri/gnd  (NOT wfr — wfr is heating oil/propane only)
+# Products: EPMR = regular gasoline (all-grades average)
+#           EPD2D = No. 2 diesel (ultra-low-sulfur as of Dec 2010)
+# Areas:    NUS (US total), R10–R50 (PADDs 1–5)
+# Process:  PTE (retail sales price, $/gallon)
+#
+# Series ID pattern: EMM_EPMR_PTE_{area}_DPG  (gasoline)
+#                    EMD_EPD2D_PTE_{area}_DPG  (diesel — note EMD not EMM)
+# ---------------------------------------------------------------------------
+
+def fetch_fuel_prices(api_key: str, start: str = None) -> pd.DataFrame:
+    """Fetch weekly retail gasoline + diesel prices for US total and all PADDs.
+
+    Returns DataFrame with columns: date, product, duoarea, value ($/gallon).
+    One call returns all products × areas — no separate fetches per PADD.
+
+    product codes:  EPMR = regular gasoline,  EPD2D = No. 2 diesel
+    duoarea codes:  NUS, R10, R20, R30, R40, R50
+    """
+    return fetch_v2(
+        route="petroleum/pri/gnd",
+        api_key=api_key,
+        facets={
+            "product":  ["EPMR", "EPD2D"],
+            "duoarea":  ["NUS", "R10", "R20", "R30", "R40", "R50"],
+            "process":  ["PTE"],
+        },
+        start=start,
+    )
+
+
 # PADD crude stocks  (Method B example — multi-area in one call)
 # ---------------------------------------------------------------------------
 
