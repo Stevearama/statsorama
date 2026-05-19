@@ -1,6 +1,3 @@
-# Cached EIA data — rebuilt automatically on first run
-data/
-
 # Python
 .venv/
 __pycache__/
