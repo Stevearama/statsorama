@@ -106,7 +106,7 @@ def refresh_from_bulk(dry_run: bool = False) -> None:
                     found[key] = True
 
                     date_range = f"{df['date'].min().date()} – {df['date'].max().date()}"
-                    print(f"  ✓ {key:22s}  {len(df):5d} rows  ({date_range})")
+                    print(f"  OK {key:22s}  {len(df):5d} rows  ({date_range})")
 
     # Report anything missing from the bulk file
     missing = [k for k, v in found.items() if not v]
