@@ -117,8 +117,9 @@ def _price_strip(api_key: str, geo: str) -> None:
         return val, wow
 
     wti_val, _, wti_wow = _latest(df_wti)
-    gas_val, gas_wow    = _latest_fuel("EPMR")
-    dsl_val, dsl_wow    = _latest_fuel("EPD2DXL0")
+    conv_val, conv_wow  = _latest_fuel("EPMRU")
+    ref_val,  ref_wow   = _latest_fuel("EPMRR")
+    dsl_val,  dsl_wow   = _latest_fuel("EPD2DXL0")
 
     def _fmt(val, wow, decimals=3):
         val_str = f"${val:,.{decimals}f}" if val is not None else "—"
@@ -130,9 +131,10 @@ def _price_strip(api_key: str, geo: str) -> None:
                  f"{sign} {abs(wow):.3f} wk</span>")
         return val_str, chg
 
-    wti_str, wti_chg = _fmt(wti_val, wti_wow, decimals=2)
-    gas_str, gas_chg = _fmt(gas_val, gas_wow)
-    dsl_str, dsl_chg = _fmt(dsl_val, dsl_wow)
+    wti_str,  wti_chg  = _fmt(wti_val,  wti_wow,  decimals=2)
+    conv_str, conv_chg = _fmt(conv_val, conv_wow)
+    ref_str,  ref_chg  = _fmt(ref_val,  ref_wow)
+    dsl_str,  dsl_chg  = _fmt(dsl_val,  dsl_wow)
 
     snap_date = ""
     for df in [df_wti, df_fuel]:
@@ -142,9 +144,10 @@ def _price_strip(api_key: str, geo: str) -> None:
 
     geo_sfx = "" if geo == "US Total" else f" ({geo})"
     items = [
-        ("WTI spot",                   wti_str, wti_chg),
-        (f"Regular gasoline{geo_sfx}", gas_str, gas_chg),
-        (f"Diesel{geo_sfx}",           dsl_str, dsl_chg),
+        ("WTI spot",                          wti_str,  wti_chg),
+        (f"Regular conv.{geo_sfx}",           conv_str, conv_chg),
+        (f"Regular ref.{geo_sfx}",            ref_str,  ref_chg),
+        (f"Diesel (ULSD){geo_sfx}",           dsl_str,  dsl_chg),
     ]
     price_html = "".join(
         f"<div style='text-align:right;'>"

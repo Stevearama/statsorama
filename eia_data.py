@@ -549,17 +549,34 @@ def fetch_v2(
     return df.dropna(subset=[value_col]).reset_index(drop=True)
 
 # ---------------------------------------------------------------------------
-# ---------------------------------------------------------------------------
 # Weekly retail fuel prices — gasoline + diesel for all PADDs  (Method B)
 # ---------------------------------------------------------------------------
 # Route:    petroleum/pri/gnd  (NOT wfr — wfr is heating oil/propane only)
-# Products: EPMR = regular gasoline (all-grades average)
-#           EPD2D = No. 2 diesel (ultra-low-sulfur as of Dec 2010)
-# Areas:    NUS (US total), R10–R50 (PADDs 1–5)
-# Process:  PTE (retail sales price, $/gallon)
 #
-# Series ID pattern: EMM_EPMR_PTE_{area}_DPG  (gasoline)
-#                    EMD_EPD2D_PTE_{area}_DPG  (diesel — note EMD not EMM)
+# Gasoline product codes (all prefix EMM_):
+#   EPMR    Regular gasoline, all formulations (combined US-level average)
+#   EPMRU   Regular conventional gasoline  (PADDs 2, 3, 4 and most of 1/5)
+#   EPMRR   Regular reformulated gasoline  (PADD 1 cities, California, etc.)
+#   EPMM    Midgrade, all formulations
+#   EPMMU   Midgrade conventional
+#   EPMMR   Midgrade reformulated
+#   EPMP    Premium, all formulations
+#   EPMPU   Premium conventional
+#   EPMPR   Premium reformulated
+#   EPM0    Total gasoline (all grades)
+#   EPM0U   Conventional gasoline (no oxy, all grades)
+#   EPM0R   Reformulated gasoline (all grades)
+#
+# Diesel product codes (prefix EMD_):
+#   EPD2D      No. 2 diesel, all types (legacy — use EPD2DXL0 instead)
+#   EPD2DXL0   No. 2 diesel low-sulfur 0–15 ppm (ULSD; current live series)
+#   EPD2DM10   No. 2 diesel low-sulfur 15–500 ppm (phased out)
+#
+# Series ID pattern: EMM_{product}_PTE_{area}_DPG  (gasoline)
+#                    EMD_{product}_PTE_{area}_DPG  (diesel — note EMD not EMM)
+# Areas:    NUS (US total), R10 (PADD 1), R20 (PADD 2), R30 (PADD 3),
+#           R40 (PADD 4), R50 (PADD 5)
+# Process:  PTE = retail sales price ($/gallon)
 # ---------------------------------------------------------------------------
 
 def fetch_fuel_prices(api_key: str, start: str = None) -> pd.DataFrame:
@@ -568,14 +585,18 @@ def fetch_fuel_prices(api_key: str, start: str = None) -> pd.DataFrame:
     Returns DataFrame with columns: date, product, duoarea, value ($/gallon).
     One call returns all products × areas — no separate fetches per PADD.
 
-    product codes:  EPMR = regular gasoline,  EPD2D = No. 2 diesel
+    product codes fetched:
+        EPMR    = regular gasoline, all formulations (combined)
+        EPMRU   = regular conventional gasoline
+        EPMRR   = regular reformulated gasoline
+        EPD2DXL0= No. 2 diesel ULSD (0-15 ppm)
     duoarea codes:  NUS, R10, R20, R30, R40, R50
     """
     return fetch_v2(
         route="petroleum/pri/gnd",
         api_key=api_key,
         facets={
-            "product":  ["EPMR", "EPD2DXL0"],  # EPD2DXL0 = ULSD (0-15 ppm), the current retail diesel series
+            "product":  ["EPMR", "EPMRU", "EPMRR", "EPD2DXL0"],
             "duoarea":  ["NUS", "R10", "R20", "R30", "R40", "R50"],
             "process":  ["PTE"],
         },
