@@ -61,11 +61,11 @@ def render_header(title: str, subtitle: str) -> None:
         f"""
         <style>
         [data-testid="stToolbarActions"] {{display: none;}}
-        .block-container {{padding-top: 1.5rem;}}
+        .block-container {{padding-top: 3.5rem;}}
         </style>
         <h1 style='font-family:"Arial Black",Arial,sans-serif;
                    color:#000000; margin-bottom:2px; font-size:2rem;
-                   padding-top:0.4rem;'>
+                   padding-top:0.6rem; line-height:1.3; overflow:visible;'>
             {title}
         </h1>
         <p style='color:#555555; font-size:15px; margin-top:0; margin-bottom:10px;'>
